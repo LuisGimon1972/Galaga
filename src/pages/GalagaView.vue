@@ -2,7 +2,6 @@
   <q-page
     class="flex flex-center arcade-bg text-white q-pa-xs column justify-start"
     style="min-height: 100vh"
-    @click="focusGame"
   >
     <div
       ref="wrapperRef"
@@ -98,7 +97,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { GalagaEngine } from '../game/GalagaEngine';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -204,6 +203,13 @@ const gameLoop = () => {
   animId = requestAnimationFrame(gameLoop);
 };
 
+// Destrava o AudioContext automaticamente no primeiro toque/clique global do utilizador
+const handleFirstInteraction = () => {
+  if (engine && (engine as any).audioCtx && (engine as any).audioCtx.state === 'suspended') {
+    (engine as any).audioCtx.resume();
+  }
+};
+
 onMounted(() => {
   window.scrollTo(0, 0);
 
@@ -212,24 +218,28 @@ onMounted(() => {
     gameLoop();
   }
 
+  // Foco automático imediato no wrapper do jogo ao montar
+  nextTick(() => {
+    focusGame();
+  });
+
   window.addEventListener('keydown', handleKeyDown, { capture: true });
   window.addEventListener('keyup', handleKeyUp, { capture: true });
-  window.addEventListener('click', focusGame);
+
+  // Ouve a primeira interação global para desbloquear o som do browser
+  window.addEventListener('pointerdown', handleFirstInteraction, { once: true });
 
   setTimeout(() => {
     window.scrollTo(0, 0);
     focusGame();
-    if (wrapperRef.value) {
-      wrapperRef.value.focus();
-    }
-  }, 100);
+  }, 50);
 });
 
 onUnmounted(() => {
   if (animId) cancelAnimationFrame(animId);
   window.removeEventListener('keydown', handleKeyDown, true);
   window.removeEventListener('keyup', handleKeyUp, true);
-  window.removeEventListener('click', focusGame);
+  window.removeEventListener('pointerdown', handleFirstInteraction);
 });
 </script>
 
@@ -318,7 +328,7 @@ onUnmounted(() => {
     font-size: 11px !important;
   }
   .bomberman-container {
-    max-height: 60vh; /* Garante que o jogo não ultrapasse o ecrã verticalmente no telemóvel */
+    max-height: 60vh;
     width: 100%;
   }
   .arcade-controls {
@@ -339,7 +349,6 @@ onUnmounted(() => {
 }
 
 @media (max-height: 700px) and (max-width: 600px) {
-  /* Ajuste ultra-compacto para celulares pequenos em modo retrato */
   .bomberman-container {
     max-height: 52vh;
   }
