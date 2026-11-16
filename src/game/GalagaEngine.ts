@@ -13,7 +13,14 @@ type Particle = {
   life: number;
   size: number;
 };
-type BonusItem = { x: number; y: number; width: number; height: number; speed: number };
+type BonusItem = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  speed: number;
+  isInvincibility?: boolean;
+};
 
 export class GalagaEngine {
   public player: PlayerShip;
@@ -34,7 +41,8 @@ export class GalagaEngine {
   private lastShotTime = 0;
   private enemyShootTimer = 0;
   private invulnerableTimer = 0;
-  private bossMusicTimer = 0; // Temporizador para o loop da música de suspense nos níveis 4 e 5
+  private bossMusicTimer = 0;
+  private invincibilityDropTimer = 0;
   private starfield: { x: number; y: number; size: number; speed: number }[] = [];
   private readonly galagaAtlas: GalagaAtlas;
   private readonly bossAtlas: GalagaAtlas;
@@ -134,7 +142,7 @@ export class GalagaEngine {
     }
   }
 
-  private playPowerupSound(): void {
+  private playPowerupSupportOrInvincibility(isInvincibility?: boolean): void {
     if (!this.audioCtx) return;
     if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
 
@@ -142,24 +150,31 @@ export class GalagaEngine {
       const osc = this.audioCtx.createOscillator();
       const gain = this.audioCtx.createGain();
 
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(300, this.audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(800, this.audioCtx.currentTime + 0.25);
+      osc.type = isInvincibility ? 'square' : 'triangle';
+      if (isInvincibility) {
+        osc.frequency.setValueAtTime(400, this.audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1000, this.audioCtx.currentTime + 0.35);
+      } else {
+        osc.frequency.setValueAtTime(300, this.audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, this.audioCtx.currentTime + 0.25);
+      }
 
       gain.gain.setValueAtTime(0.3, this.audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.25);
+      gain.gain.exponentialRampToValueAtTime(
+        0.01,
+        this.audioCtx.currentTime + (isInvincibility ? 0.35 : 0.25),
+      );
 
       osc.connect(gain);
       gain.connect(this.audioCtx.destination);
 
       osc.start();
-      osc.stop(this.audioCtx.currentTime + 0.25);
+      osc.stop(this.audioCtx.currentTime + (isInvincibility ? 0.35 : 0.25));
     } catch {
       // Ignora
     }
   }
 
-  // Música de suspense rítmica e tensa para os Níveis 4 e 5 (Bosses)
   private playBossSuspenseBeat(): void {
     if (!this.audioCtx) return;
     if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
@@ -170,10 +185,9 @@ export class GalagaEngine {
       const gain = this.audioCtx.createGain();
 
       osc.type = 'sawtooth';
-      // Notas graves e misteriosas em tom de suspense
-      osc.frequency.setValueAtTime(65.41, t); // C2
-      osc.frequency.setValueAtTime(92.5, t + 0.2); // F#2
-      osc.frequency.setValueAtTime(58.27, t + 0.4); // Bb1
+      osc.frequency.setValueAtTime(65.41, t);
+      osc.frequency.setValueAtTime(92.5, t + 0.2);
+      osc.frequency.setValueAtTime(58.27, t + 0.4);
 
       gain.gain.setValueAtTime(0.25, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
@@ -258,6 +272,7 @@ export class GalagaEngine {
     this.bonuses = [];
     this.invulnerableTimer = 120;
     this.bossMusicTimer = 0;
+    this.invincibilityDropTimer = 0;
 
     this.playWaveStartSound();
 
@@ -352,12 +367,24 @@ export class GalagaEngine {
       this.invulnerableTimer--;
     }
 
-    // Executa a música de suspense em loop a cada 50 frames (apenas nos níveis 4 e 5)
     if (this.wave === 4 || this.wave === 5) {
       this.bossMusicTimer++;
       if (this.bossMusicTimer >= 50) {
         this.bossMusicTimer = 0;
         this.playBossSuspenseBeat();
+      }
+
+      this.invincibilityDropTimer++;
+      if (this.invincibilityDropTimer >= 420) {
+        this.invincibilityDropTimer = 0;
+        this.bonuses.push({
+          x: Math.random() * (CANVAS_WIDTH - 60) + 30,
+          y: -20,
+          width: 22,
+          height: 22,
+          speed: 1.2,
+          isInvincibility: true,
+        });
       }
     }
 
@@ -435,15 +462,28 @@ export class GalagaEngine {
         bonus.y < this.player.y + this.player.height &&
         bonus.y + bonus.height > this.player.y
       ) {
-        this.lives++;
-        this.playPowerupSound();
-        this.createExplosion(
-          bonus.x + bonus.width / 2,
-          bonus.y + bonus.height / 2,
-          '#22c55e',
-          15,
-          2,
-        );
+        this.playPowerupSupportOrInvincibility(bonus.isInvincibility);
+
+        if (bonus.isInvincibility) {
+          this.invulnerableTimer = 180;
+          this.createExplosion(
+            bonus.x + bonus.width / 2,
+            bonus.y + bonus.height / 2,
+            '#38bdf8',
+            20,
+            2.5,
+          );
+        } else {
+          this.lives++;
+          this.createExplosion(
+            bonus.x + bonus.width / 2,
+            bonus.y + bonus.height / 2,
+            '#22c55e',
+            15,
+            2,
+          );
+        }
+
         this.bonuses.splice(i, 1);
       }
     }
@@ -513,12 +553,14 @@ export class GalagaEngine {
           this.bullets.splice(i, 1);
         }
       } else {
+        // CORREÇÃO DA COLISÃO NAS BORDAS: Expandida ligeiramente a tolerância de deteção de impacto (`b.x` considerando a largura da bala)
+        const bulletWidth = 4;
         if (
           this.player.isAlive &&
           this.invulnerableTimer === 0 &&
-          b.x >= this.player.x &&
+          b.x + bulletWidth >= this.player.x &&
           b.x <= this.player.x + this.player.width &&
-          b.y >= this.player.y &&
+          b.y + 10 >= this.player.y &&
           b.y <= this.player.y + this.player.height
         ) {
           this.bullets.splice(i, 1);
@@ -602,14 +644,19 @@ export class GalagaEngine {
 
     for (const bonus of this.bonuses) {
       ctx.save();
-      ctx.fillStyle = '#22c55e';
-      ctx.shadowColor = '#22c55e';
-      ctx.shadowBlur = 10;
+      const bonusColor = bonus.isInvincibility ? '#38bdf8' : '#22c55e';
+      ctx.fillStyle = bonusColor;
+      ctx.shadowColor = bonusColor;
+      ctx.shadowBlur = 12;
       ctx.fillRect(bonus.x, bonus.y, bonus.width, bonus.height);
 
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(bonus.x + 8, bonus.y + 4, 4, 12);
-      ctx.fillRect(bonus.x + 4, bonus.y + 8, 12, 4);
+      if (bonus.isInvincibility) {
+        ctx.fillRect(bonus.x + 6, bonus.y + 6, 10, 10);
+      } else {
+        ctx.fillRect(bonus.x + 8, bonus.y + 4, 4, 12);
+        ctx.fillRect(bonus.x + 4, bonus.y + 8, 12, 4);
+      }
       ctx.restore();
     }
 
